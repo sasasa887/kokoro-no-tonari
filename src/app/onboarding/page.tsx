@@ -4,14 +4,15 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Character } from "@/components/Character";
 import { CrisisCard } from "@/components/CrisisCard";
-import { isEligibleAge, MIN_AGE } from "@/lib/age";
+import { isEligibleAge, MAX_AGE, MIN_AGE } from "@/lib/age";
 import { COACH_TYPES, COACHES, type CoachType } from "@/lib/coach";
 import { allConsented, CONSENT_ITEMS, type ConsentState } from "@/lib/consent";
 
 type Step = "age" | "underage" | "consent" | "profile";
 
 const THIS_YEAR = new Date().getFullYear();
-const YEARS = Array.from({ length: 90 }, (_, i) => THIS_YEAR - i);
+// サーバー側の上限（MAX_AGE 歳）と同じ範囲を選べるようにする
+const YEARS = Array.from({ length: MAX_AGE + 1 }, (_, i) => THIS_YEAR - i);
 const MONTHS = Array.from({ length: 12 }, (_, i) => i + 1);
 
 export default function OnboardingPage() {
@@ -42,6 +43,10 @@ export default function OnboardingPage() {
         body: JSON.stringify({ birthMonth, consents, nickname, coach }),
       });
       if (res.status === 403) return setStep("underage");
+      if (res.status === 429) {
+        setError("短い時間に何度も登録が行われました。しばらくしてからお試しください。");
+        return;
+      }
       if (!res.ok) throw new Error();
       router.push("/chat");
     } catch {

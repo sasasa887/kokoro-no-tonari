@@ -19,8 +19,18 @@ import {
  */
 const CHAT_MODEL = process.env.CHAT_MODEL ?? "claude-opus-5-5";
 const REFLECTION_MODEL = process.env.REFLECTION_MODEL ?? "claude-opus-5-5";
-type Effort = "low" | "medium" | "high";
-const CHAT_EFFORT = (process.env.CHAT_EFFORT as Effort | undefined) ?? "low";
+const EFFORTS = ["low", "medium", "high"] as const;
+type Effort = (typeof EFFORTS)[number];
+
+/** 想定外の値は API の 400 で全会話が止まるため、既定の low に戻す */
+export function parseEffort(raw: string | undefined): Effort {
+  const v = raw?.trim().toLowerCase();
+  if (!v) return "low";
+  if ((EFFORTS as readonly string[]).includes(v)) return v as Effort;
+  console.warn(`CHAT_EFFORT の値が不正なため low を使います: ${raw}`);
+  return "low";
+}
+const CHAT_EFFORT = parseEffort(process.env.CHAT_EFFORT);
 
 /** 安全分類器による拒否が起きたとき、サーバー側で別モデルに引き継がせる（ベータ機能） */
 const FALLBACK_BETA = "server-side-fallback-2026-07-01";
@@ -48,6 +58,8 @@ export async function* streamChat(params: {
   coach: CoachType;
   nickname: string;
   messages: ChatMessage[];
+  /** 利用者が画面を閉じたら API のストリームも止める */
+  signal?: AbortSignal;
 }): AsyncGenerator<ChatStreamEvent> {
   const history = trimHistory(params.messages);
   if (isMockMode()) {
@@ -55,7 +67,8 @@ export async function* streamChat(params: {
     return;
   }
 
-  const stream = getClient().beta.messages.stream({
+  const stream = getClient().beta.messages.stream(
+    {
     model: CHAT_MODEL,
     max_tokens: 16000,
     betas: [FALLBACK_BETA],
@@ -72,7 +85,9 @@ export async function* streamChat(params: {
       effort: CHAT_EFFORT,
       format: { type: "json_schema", schema: CHAT_OUTPUT_JSON_SCHEMA },
     },
-  });
+    },
+    { signal: params.signal },
+  );
 
   let extractor = new ReplyExtractor();
   for await (const event of stream) {

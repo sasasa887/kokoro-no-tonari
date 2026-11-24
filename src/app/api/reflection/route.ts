@@ -1,19 +1,25 @@
 import { cookies } from "next/headers";
 import { z } from "zod";
 import { createReflection } from "@/lib/ai/claude";
-import { ChatMessageSchema } from "@/lib/ai/schema";
-import { parseProfileCookie, PROFILE_COOKIE } from "@/lib/profile";
+import { ChatMessageSchema, MAX_REFLECTION_MESSAGES } from "@/lib/ai/schema";
+import { PROFILE_COOKIE, readProfile } from "@/lib/profile";
+import { consumeRateLimit, LIMITS } from "@/lib/rate-limit";
 
 const BodySchema = z.object({
-  messages: z.array(ChatMessageSchema).min(1).max(200),
+  messages: z.array(ChatMessageSchema).min(1).max(MAX_REFLECTION_MESSAGES),
 });
 
 export async function POST(request: Request) {
-  const profile = parseProfileCookie((await cookies()).get(PROFILE_COOKIE)?.value);
+  const profile = await readProfile((await cookies()).get(PROFILE_COOKIE)?.value);
   if (!profile) return Response.json({ error: "unauthorized" }, { status: 401 });
 
   const parsed = BodySchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return Response.json({ error: "invalid_request" }, { status: 400 });
+
+  const { limit, windowMs } = LIMITS.reflectionPerProfile();
+  if (!consumeRateLimit(`reflection:${profile.id}`, limit, windowMs)) {
+    return Response.json({ error: "daily_limit" }, { status: 429 });
+  }
 
   try {
     const reflection = await createReflection(parsed.data.messages);

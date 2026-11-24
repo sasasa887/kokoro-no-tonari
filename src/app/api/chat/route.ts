@@ -2,12 +2,14 @@ import Anthropic from "@anthropic-ai/sdk";
 import { cookies } from "next/headers";
 import { z } from "zod";
 import { AIOutputError, AIRefusalError, streamChat } from "@/lib/ai/claude";
-import { ChatMessageSchema } from "@/lib/ai/schema";
+import { ChatMessageSchema, MAX_HISTORY } from "@/lib/ai/schema";
 import { detectCrisisKeywords } from "@/lib/crisis";
-import { parseProfileCookie, PROFILE_COOKIE } from "@/lib/profile";
+import { PROFILE_COOKIE, readProfile } from "@/lib/profile";
+import { clientIp, consumeRateLimit, LIMITS } from "@/lib/rate-limit";
 
+/** 画面は直近の発言だけを送る。余裕をもたせつつ、巨大なリクエストは受け付けない */
 const BodySchema = z.object({
-  messages: z.array(ChatMessageSchema).min(1).max(200),
+  messages: z.array(ChatMessageSchema).min(1).max(MAX_HISTORY * 2),
 });
 
 /**
@@ -19,26 +21,54 @@ const BodySchema = z.object({
  * {"type":"error","code"}     画面は入力文を残したまま再送ボタンを出す
  */
 export async function POST(request: Request) {
-  const profile = parseProfileCookie((await cookies()).get(PROFILE_COOKIE)?.value);
+  const profile = await readProfile((await cookies()).get(PROFILE_COOKIE)?.value);
   if (!profile) return Response.json({ error: "unauthorized" }, { status: 401 });
 
   const parsed = BodySchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return Response.json({ error: "invalid_request" }, { status: 400 });
   const { messages } = parsed.data;
-  if (messages.at(-1)?.role !== "user") {
+  const last = messages.at(-1);
+  if (!last || last.role !== "user") {
     return Response.json({ error: "invalid_request" }, { status: 400 });
   }
 
-  // TODO(ログインとDB): 1日の発言数の上限を確認し、発言を暗号化して messages に保存する
-  const keywordCrisis = detectCrisisKeywords(messages.at(-1)!.content);
+  // 危機の判定は上限に達していても行い、窓口は必ず出せるようにする
+  const keywordCrisis = detectCrisisKeywords(last.content);
+
+  const perProfile = LIMITS.chatPerProfile();
+  const perIp = LIMITS.chatPerIp();
+  if (
+    !consumeRateLimit(`chat:${profile.id}`, perProfile.limit, perProfile.windowMs) ||
+    !consumeRateLimit(`chat-ip:${clientIp(request)}`, perIp.limit, perIp.windowMs)
+  ) {
+    return Response.json({ error: "daily_limit", crisis: keywordCrisis }, { status: 429 });
+  }
+
+  // TODO(ログインとDB): 発言を暗号化して messages に保存し、1日の上限は DB で数える
   const encoder = new TextEncoder();
+  const abort = new AbortController();
+  request.signal.addEventListener("abort", () => abort.abort());
+  let closed = false;
 
   const body = new ReadableStream<Uint8Array>({
     async start(controller) {
-      const send = (obj: unknown) => controller.enqueue(encoder.encode(JSON.stringify(obj) + "\n"));
+      const send = (obj: unknown) => {
+        if (closed) return;
+        try {
+          controller.enqueue(encoder.encode(JSON.stringify(obj) + "\n"));
+        } catch {
+          closed = true; // 利用者が画面を閉じた
+        }
+      };
       if (keywordCrisis) send({ type: "crisis" });
       try {
-        for await (const event of streamChat({ coach: profile.coach, nickname: profile.nickname, messages })) {
+        for await (const event of streamChat({
+          coach: profile.coach,
+          nickname: profile.nickname,
+          messages,
+          signal: abort.signal,
+        })) {
+          if (closed) break;
           if (event.type === "final") {
             send({
               type: "done",
@@ -51,12 +81,25 @@ export async function POST(request: Request) {
           }
         }
       } catch (error) {
-        send({ type: "error", code: errorCode(error), crisis: keywordCrisis });
-        // 会話の本文はログに出さない（企画書「安全性とプライバシー」）
-        console.error("chat failed:", errorCode(error));
+        if (!closed && !abort.signal.aborted) {
+          send({ type: "error", code: errorCode(error), crisis: keywordCrisis });
+          // 会話の本文はログに出さない（企画書「安全性とプライバシー」）
+          console.error("chat failed:", errorCode(error));
+        }
       } finally {
-        controller.close();
+        if (!closed) {
+          closed = true;
+          try {
+            controller.close();
+          } catch {
+            // すでに閉じられている
+          }
+        }
       }
+    },
+    cancel() {
+      closed = true;
+      abort.abort();
     },
   });
 

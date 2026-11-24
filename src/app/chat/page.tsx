@@ -1,11 +1,19 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { Character } from "@/components/Character";
 import { CrisisCard } from "@/components/CrisisCard";
 import { MoodPicker } from "@/components/MoodPicker";
-import type { ChatMessage, Emotion, Reflection } from "@/lib/ai/schema";
+import {
+  MAX_REFLECTION_MESSAGES,
+  MAX_USER_CHARS,
+  trimHistory,
+  type ChatMessage,
+  type Emotion,
+  type Reflection,
+} from "@/lib/ai/schema";
 
 type Phase = "moodBefore" | "chat" | "moodAfter" | "reflecting" | "reflection" | "reflectionFailed";
 
@@ -13,8 +21,11 @@ const DRAFT_KEY = "kt_draft";
 
 const ERROR_TEXT: Record<string, string> = {
   rate_limited: "いま混み合っているみたい。少し待ってから送ってみてください。",
+  daily_limit: "今日はたくさん話したね。続きはまた明日話そう。",
   default: "ごめん、いまうまく返事ができないみたい。",
 };
+
+class UnauthorizedError extends Error {}
 
 function readDraft(): string {
   try {
@@ -34,6 +45,7 @@ function writeDraft(text: string) {
 }
 
 export default function ChatPage() {
+  const router = useRouter();
   const [phase, setPhase] = useState<Phase>("moodBefore");
   const [moodBefore, setMoodBefore] = useState<number | null>(null);
   const [moodAfter, setMoodAfter] = useState<number | null>(null);
@@ -71,8 +83,15 @@ export default function ChatPage() {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: next }),
+        // AIに送るのは直近の発言だけ（長い会話でも上限に引っかからない）
+        body: JSON.stringify({ messages: trimHistory(next) }),
       });
+      if (res.status === 401) throw new UnauthorizedError();
+      if (res.status === 429) {
+        const data = await res.json().catch(() => ({}));
+        if (data.crisis) setCrisis(true);
+        throw new Error("daily_limit");
+      }
       if (!res.ok || !res.body) throw new Error(String(res.status));
 
       const reader = res.body.getReader();
@@ -107,6 +126,12 @@ export default function ChatPage() {
       }
       if (!finished) throw new Error("incomplete");
     } catch (e) {
+      if (e instanceof UnauthorizedError) {
+        // 入力中の文章は端末に残したまま、初回設定（同意の取り直し）へ移る
+        writeDraft(text);
+        router.push("/onboarding");
+        return;
+      }
       // 入力した文章は消さずに戻し、再送できるようにする（企画書「エラー時の画面」）
       const code = e instanceof Error ? e.message : "unknown";
       setMessages(history);
@@ -124,8 +149,12 @@ export default function ChatPage() {
       const res = await fetch("/api/reflection", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages }),
+        body: JSON.stringify({ messages: messages.slice(-MAX_REFLECTION_MESSAGES) }),
       });
+      if (res.status === 401) {
+        router.push("/onboarding");
+        return;
+      }
       if (!res.ok) throw new Error();
       const data = (await res.json()) as { reflection: Reflection };
       setReflection(data.reflection);
@@ -212,7 +241,7 @@ export default function ChatPage() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             rows={2}
-            maxLength={2000}
+            maxLength={MAX_USER_CHARS}
             placeholder="いま思っていることを書いてみてください"
             aria-label="メッセージ"
             className="flex-1 resize-none rounded-2xl border border-line bg-surface p-3"

@@ -13,8 +13,8 @@ create table public.profiles (
   agreed_offshore_at timestamptz not null,
   agreed_voice_at timestamptz,
   created_at timestamptz not null default now(),
-  -- 18歳以上に限定（生年月の1日生まれとみなす）
-  constraint profiles_adult check (birth_month <= (current_date - interval '18 years'))
+  -- 18歳以上に限定（生年月の1日生まれとみなし、日本時間の日付で判定する）
+  constraint profiles_adult check (birth_month <= ((now() at time zone 'Asia/Tokyo')::date - interval '18 years'))
 );
 
 create table public.sessions (
@@ -78,13 +78,32 @@ create policy "own profile" on public.profiles
   for all using (id = auth.uid()) with check (id = auth.uid());
 create policy "own sessions" on public.sessions
   for all using (user_id = auth.uid()) with check (user_id = auth.uid());
+-- 会話に紐づく行は、user_id が本人であることに加えて、session_id の会話も本人のものであることを確かめる
+-- （他人の会話の ID に行を書き込んだり、振り返りの主キーを先に取ったりできないようにする）
 create policy "own messages" on public.messages
-  for all using (user_id = auth.uid()) with check (user_id = auth.uid());
+  for all
+  using (user_id = auth.uid())
+  with check (
+    user_id = auth.uid()
+    and exists (select 1 from public.sessions s where s.id = session_id and s.user_id = auth.uid())
+  );
 create policy "own reflections" on public.reflections
-  for all using (user_id = auth.uid()) with check (user_id = auth.uid());
+  for all
+  using (user_id = auth.uid())
+  with check (
+    user_id = auth.uid()
+    and exists (select 1 from public.sessions s where s.id = session_id and s.user_id = auth.uid())
+  );
 -- 操作ログは本人が追加だけできる（読み取りは管理用の集計で行う）
 create policy "insert own events" on public.events
-  for insert with check (user_id = auth.uid());
+  for insert
+  with check (
+    user_id = auth.uid()
+    and (
+      session_id is null
+      or exists (select 1 from public.sessions s where s.id = session_id and s.user_id = auth.uid())
+    )
+  );
 
 -- ---- 保存期間（企画書「非機能要件」） ----
 -- 会話の本文は180日、操作ログは1年で削除する。振り返りと気分は本人が消すまで残す。
@@ -94,6 +113,4 @@ language sql security definer set search_path = public as $$
   delete from public.events where created_at < now() - interval '1 year';
 $$;
 revoke all on function public.purge_expired_data() from public, anon, authenticated;
-
--- 毎日 3:15（UTC）に実行する。pg_cron 拡張を Supabase のダッシュボードで有効にしてから実行する。
--- select cron.schedule('purge-expired-data', '15 3 * * *', $$select public.purge_expired_data()$$);
+-- 定期実行の登録は 0002_schedule_purge.sql で行う

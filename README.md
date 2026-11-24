@@ -17,6 +17,10 @@
 
 `ANTHROPIC_API_KEY` がなければ、決まった返答を返すモックで動く。
 
+デモモードのプロフィールは HMAC で署名した Cookie に入れている（`SESSION_SECRET`、本番では必須）。
+対話と振り返りには1日の回数制限がある。ただしメモリ上で数えているため、サーバーレスでは目安にとどまる。
+本物の API キーで一般公開するのは、Supabase の Auth と DB での上限管理に移してからにする。
+
 ## まだつないでいないもの（次の作業）
 
 - Supabase の Auth（ログイン）と DB への保存。今はプロフィールを Cookie に入れるデモモード
@@ -30,6 +34,12 @@ npm install
 cp .env.example .env.local   # 必要なら ANTHROPIC_API_KEY などを入れる
 npm run dev
 ```
+
+## 公開するときの設定
+
+- Vercel の関数は東京リージョン（`vercel.json` の `regions: ["hnd1"]`）で動かす。同意画面とプライバシーポリシーの説明と合わせるため、変えないこと。
+- Supabase のプロジェクトは東京リージョン（Northeast Asia (Tokyo)）で作る。
+- `supabase/migrations` を順に当てる。`0002_schedule_purge.sql` で、保存期間を過ぎたデータを毎日削除するジョブ（pg_cron）が登録される。登録できたかは `select * from cron.job;` で確かめる。
 
 ## 確認
 

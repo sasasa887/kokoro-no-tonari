@@ -1,7 +1,24 @@
 import { describe, expect, it } from "vitest";
-import { parseChatOutput } from "./claude";
+import { parseChatOutput, parseEffort } from "./claude";
 import { ReplyExtractor } from "./reply-extractor";
-import { trimHistory, type ChatMessage } from "./schema";
+import { ChatMessageSchema, trimHistory, type ChatMessage } from "./schema";
+
+describe("ChatMessageSchema", () => {
+  it("AIの長い返答（2000文字超）は受け付け、利用者の入力は2000文字までに制限する", () => {
+    expect(ChatMessageSchema.safeParse({ role: "assistant", content: "あ".repeat(3000) }).success).toBe(true);
+    expect(ChatMessageSchema.safeParse({ role: "user", content: "あ".repeat(2000) }).success).toBe(true);
+    expect(ChatMessageSchema.safeParse({ role: "user", content: "あ".repeat(2001) }).success).toBe(false);
+  });
+});
+
+describe("parseEffort", () => {
+  it("想定外の値は low に戻す", () => {
+    expect(parseEffort(undefined)).toBe("low");
+    expect(parseEffort("Medium")).toBe("medium");
+    expect(parseEffort("xhigh")).toBe("low");
+    expect(parseEffort("Low ")).toBe("low");
+  });
+});
 
 function feed(chunks: string[]): string {
   const ex = new ReplyExtractor();

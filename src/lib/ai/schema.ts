@@ -33,11 +33,19 @@ export const ReflectionSchema = z.object({
 });
 export type Reflection = z.infer<typeof ReflectionSchema>;
 
-export const ChatMessageSchema = z.object({
-  role: z.enum(["user", "assistant"]),
-  content: z.string().min(1).max(2000),
-});
+/** 利用者の1回の入力の上限（画面の maxLength と同じ） */
+export const MAX_USER_CHARS = 2000;
+/** AIの返答はモデルが長く書くこともあるため、上限を広めにとる */
+export const MAX_ASSISTANT_CHARS = 8000;
+
+export const ChatMessageSchema = z.discriminatedUnion("role", [
+  z.object({ role: z.literal("user"), content: z.string().min(1).max(MAX_USER_CHARS) }),
+  z.object({ role: z.literal("assistant"), content: z.string().min(1).max(MAX_ASSISTANT_CHARS) }),
+]);
 export type ChatMessage = z.infer<typeof ChatMessageSchema>;
+
+/** 振り返りに使う会話の上限件数（画面はこれより古い分を切り落として送る） */
+export const MAX_REFLECTION_MESSAGES = 200;
 
 /** AIに送るのは直近20発言まで（企画書「AI設計」：費用を抑える） */
 export const MAX_HISTORY = 20;

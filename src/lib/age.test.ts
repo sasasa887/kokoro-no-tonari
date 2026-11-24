@@ -1,13 +1,19 @@
 import { describe, expect, it } from "vitest";
 import { ageFromBirthMonth, isEligibleAge } from "./age";
 
-const today = new Date(2026, 10, 24); // 2026-11-24
+const today = new Date("2026-11-24T03:00:00Z"); // 日本時間 2026-11-24 12:00
 
 describe("ageFromBirthMonth", () => {
   it("誕生月に入った時点で加齢する", () => {
     expect(ageFromBirthMonth("2008-11", today)).toBe(18);
     expect(ageFromBirthMonth("2008-12", today)).toBe(17);
     expect(ageFromBirthMonth("2008-10", today)).toBe(18);
+  });
+
+  it("日本時間で月が変わっていれば、UTC ではまだ前月でも加齢する", () => {
+    const earlyJst = new Date("2026-11-30T20:00:00Z"); // 日本時間 2026-12-01 05:00
+    expect(ageFromBirthMonth("2008-12", earlyJst)).toBe(18);
+    expect(isEligibleAge("2008-12", earlyJst)).toBe(true);
   });
 
   it("形式が不正なら例外を投げる", () => {

@@ -1,10 +1,10 @@
 import Link from "next/link";
 import { cookies } from "next/headers";
 import { Character } from "@/components/Character";
-import { parseProfileCookie, PROFILE_COOKIE } from "@/lib/profile";
+import { PROFILE_COOKIE, readProfile } from "@/lib/profile";
 
 export default async function Home() {
-  const profile = parseProfileCookie((await cookies()).get(PROFILE_COOKIE)?.value);
+  const profile = await readProfile((await cookies()).get(PROFILE_COOKIE)?.value);
 
   return (
     <main className="flex flex-1 flex-col items-center justify-center gap-6 py-10 text-center">
