@@ -5,6 +5,7 @@ import { COACH_TYPES } from "@/lib/coach";
 import { allConsented, CONSENT_VERSION } from "@/lib/consent";
 import { PROFILE_COOKIE, PROFILE_MAX_AGE_SECONDS, signProfile, type Profile } from "@/lib/profile";
 import { clientIp, consumeRateLimit, LIMITS } from "@/lib/rate-limit";
+import { rejectCrossSite } from "@/lib/request-guard";
 
 const BodySchema = z.object({
   birthMonth: z.string().regex(/^\d{4}-\d{2}$/),
@@ -14,6 +15,9 @@ const BodySchema = z.object({
 });
 
 export async function POST(request: Request) {
+  const blocked = rejectCrossSite(request);
+  if (blocked) return blocked;
+
   const { limit, windowMs } = LIMITS.onboardingPerIp();
   if (!consumeRateLimit(`onboarding:${clientIp(request)}`, limit, windowMs)) {
     return NextResponse.json({ error: "rate_limited" }, { status: 429 });

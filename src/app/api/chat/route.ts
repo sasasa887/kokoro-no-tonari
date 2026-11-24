@@ -1,15 +1,21 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { cookies } from "next/headers";
 import { z } from "zod";
-import { AIOutputError, AIRefusalError, streamChat } from "@/lib/ai/claude";
-import { ChatMessageSchema, MAX_HISTORY } from "@/lib/ai/schema";
+import { AINotConfiguredError, AIOutputError, AIRefusalError, streamChat } from "@/lib/ai/claude";
+import { ChatMessageSchema, MAX_CHAT_REQUEST_CHARS, MAX_HISTORY, totalChars } from "@/lib/ai/schema";
 import { detectCrisisKeywords } from "@/lib/crisis";
 import { PROFILE_COOKIE, readProfile } from "@/lib/profile";
+import { rejectCrossSite } from "@/lib/request-guard";
 import { clientIp, consumeRateLimit, LIMITS } from "@/lib/rate-limit";
 
 /** 画面は直近の発言だけを送る。余裕をもたせつつ、巨大なリクエストは受け付けない */
 const BodySchema = z.object({
-  messages: z.array(ChatMessageSchema).min(1).max(MAX_HISTORY * 2),
+  messages: z
+    .array(ChatMessageSchema)
+    .min(1)
+    .max(MAX_HISTORY * 2)
+    // 1回の呼び出しの費用に上限をつける（長い履歴を送りつけて費用をかさませるのを防ぐ）
+    .refine((m) => totalChars(m) <= MAX_CHAT_REQUEST_CHARS),
 });
 
 /**
@@ -21,6 +27,8 @@ const BodySchema = z.object({
  * {"type":"error","code"}     画面は入力文を残したまま再送ボタンを出す
  */
 export async function POST(request: Request) {
+  const blocked = rejectCrossSite(request);
+  if (blocked) return blocked;
   const profile = await readProfile((await cookies()).get(PROFILE_COOKIE)?.value);
   if (!profile) return Response.json({ error: "unauthorized" }, { status: 401 });
 
@@ -109,6 +117,7 @@ export async function POST(request: Request) {
 }
 
 function errorCode(error: unknown): string {
+  if (error instanceof AINotConfiguredError) return "not_configured";
   if (error instanceof AIRefusalError) return "refusal";
   if (error instanceof AIOutputError) return "bad_output";
   if (error instanceof Anthropic.RateLimitError) return "rate_limited";

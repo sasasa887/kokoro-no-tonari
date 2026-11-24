@@ -7,9 +7,11 @@ import { Character } from "@/components/Character";
 import { CrisisCard } from "@/components/CrisisCard";
 import { MoodPicker } from "@/components/MoodPicker";
 import {
+  MAX_REFLECTION_CHARS,
   MAX_REFLECTION_MESSAGES,
   MAX_USER_CHARS,
   trimHistory,
+  trimToBudget,
   type ChatMessage,
   type Emotion,
   type Reflection,
@@ -17,6 +19,7 @@ import {
 
 type Phase = "moodBefore" | "chat" | "moodAfter" | "reflecting" | "reflection" | "reflectionFailed";
 
+// 入力途中の文章は、タブを閉じれば消える sessionStorage に置く（共有端末に悩みの文章を残さない）
 const DRAFT_KEY = "kt_draft";
 
 const ERROR_TEXT: Record<string, string> = {
@@ -29,7 +32,7 @@ class UnauthorizedError extends Error {}
 
 function readDraft(): string {
   try {
-    return localStorage.getItem(DRAFT_KEY) ?? "";
+    return sessionStorage.getItem(DRAFT_KEY) ?? "";
   } catch {
     return "";
   }
@@ -37,8 +40,8 @@ function readDraft(): string {
 
 function writeDraft(text: string) {
   try {
-    if (text) localStorage.setItem(DRAFT_KEY, text);
-    else localStorage.removeItem(DRAFT_KEY);
+    if (text) sessionStorage.setItem(DRAFT_KEY, text);
+    else sessionStorage.removeItem(DRAFT_KEY);
   } catch {
     // 端末に保存できなくても会話は続けられる
   }
@@ -149,7 +152,9 @@ export default function ChatPage() {
       const res = await fetch("/api/reflection", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: messages.slice(-MAX_REFLECTION_MESSAGES) }),
+        body: JSON.stringify({
+          messages: trimToBudget(messages, MAX_REFLECTION_MESSAGES, MAX_REFLECTION_CHARS),
+        }),
       });
       if (res.status === 401) {
         router.push("/onboarding");

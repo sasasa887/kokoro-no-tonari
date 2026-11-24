@@ -25,7 +25,7 @@ const DEV_SECRET = "dev-only-secret-do-not-use-in-production";
 function getSecret(): string {
   const secret = process.env.SESSION_SECRET;
   if (secret && secret.length >= 32) return secret;
-  if (process.env.NODE_ENV === "production" && process.env.ALLOW_DEV_SECRET !== "1") {
+  if (process.env.NODE_ENV === "production") {
     throw new Error("SESSION_SECRET（32文字以上）が設定されていません");
   }
   return DEV_SECRET;

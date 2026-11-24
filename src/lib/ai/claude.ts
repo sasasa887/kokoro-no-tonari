@@ -37,9 +37,19 @@ const FALLBACK_BETA = "server-side-fallback-2026-07-01";
 
 export class AIRefusalError extends Error {}
 export class AIOutputError extends Error {}
+export class AINotConfiguredError extends Error {}
 
+/**
+ * APIキーがないときはモックで動く。ただし本番では、利用者がモックの返答を
+ * 本物のAIだと思わないよう、DEMO_MODE=1 を明示したときだけモックを使う。
+ */
 export function isMockMode(): boolean {
-  return !process.env.ANTHROPIC_API_KEY && !process.env.ANTHROPIC_AUTH_TOKEN;
+  const hasKey = Boolean(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN);
+  if (hasKey) return false;
+  if (process.env.NODE_ENV === "production" && process.env.DEMO_MODE !== "1") {
+    throw new AINotConfiguredError("ANTHROPIC_API_KEY が設定されていません");
+  }
+  return true;
 }
 
 let client: Anthropic | null = null;

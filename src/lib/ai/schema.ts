@@ -49,10 +49,33 @@ export const MAX_REFLECTION_MESSAGES = 200;
 
 /** AIに送るのは直近20発言まで（企画書「AI設計」：費用を抑える） */
 export const MAX_HISTORY = 20;
+/** 1回の対話で送る文字数の上限（画面はこの範囲に切り詰め、サーバーは余裕をみた上限で拒否する） */
+export const MAX_HISTORY_CHARS = 30_000;
+export const MAX_CHAT_REQUEST_CHARS = 40_000;
+/** 振り返りに送る文字数の上限 */
+export const MAX_REFLECTION_CHARS = 60_000;
+
+export function totalChars(messages: ChatMessage[]): number {
+  return messages.reduce((n, m) => n + m.content.length, 0);
+}
+
+/**
+ * 新しい発言から順に、件数と文字数の上限に収まる分だけ残す。最後の発言は必ず残す。
+ * API の制約に合わせ、先頭は user にそろえる。
+ */
+export function trimToBudget(messages: ChatMessage[], maxMessages: number, maxChars: number): ChatMessage[] {
+  const kept: ChatMessage[] = [];
+  let chars = 0;
+  for (let i = messages.length - 1; i >= 0 && kept.length < maxMessages; i--) {
+    const m = messages[i];
+    if (kept.length > 0 && chars + m.content.length > maxChars) break;
+    kept.unshift(m);
+    chars += m.content.length;
+  }
+  while (kept.length > 1 && kept[0].role !== "user") kept.shift();
+  return kept;
+}
 
 export function trimHistory(messages: ChatMessage[]): ChatMessage[] {
-  let trimmed = messages.slice(-MAX_HISTORY);
-  // API の制約：最初のメッセージは user にする
-  while (trimmed.length > 0 && trimmed[0].role !== "user") trimmed = trimmed.slice(1);
-  return trimmed;
+  return trimToBudget(messages, MAX_HISTORY, MAX_HISTORY_CHARS);
 }

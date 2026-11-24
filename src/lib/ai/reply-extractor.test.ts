@@ -1,7 +1,26 @@
 import { describe, expect, it } from "vitest";
 import { parseChatOutput, parseEffort } from "./claude";
 import { ReplyExtractor } from "./reply-extractor";
-import { ChatMessageSchema, trimHistory, type ChatMessage } from "./schema";
+import { ChatMessageSchema, trimHistory, trimToBudget, type ChatMessage } from "./schema";
+
+describe("trimToBudget", () => {
+  const msgs: ChatMessage[] = [
+    { role: "user", content: "a".repeat(10) },
+    { role: "assistant", content: "b".repeat(50) },
+    { role: "user", content: "c".repeat(10) },
+    { role: "assistant", content: "d".repeat(10) },
+    { role: "user", content: "e".repeat(10) },
+  ];
+
+  it("文字数の上限に収まる分だけ新しい方から残し、先頭を user にそろえる", () => {
+    const t = trimToBudget(msgs, 100, 35);
+    expect(t.map((m) => m.content[0])).toEqual(["c", "d", "e"]);
+  });
+
+  it("最後の発言は上限を超えても残す", () => {
+    expect(trimToBudget(msgs, 100, 1).map((m) => m.content[0])).toEqual(["e"]);
+  });
+});
 
 describe("ChatMessageSchema", () => {
   it("AIの長い返答（2000文字超）は受け付け、利用者の入力は2000文字までに制限する", () => {

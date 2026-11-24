@@ -5,14 +5,18 @@
  */
 type Bucket = { count: number; resetAt: number };
 const buckets = new Map<string, Bucket>();
-const MAX_KEYS = 10_000;
+const MAX_KEYS = 50_000;
 
 export function consumeRateLimit(key: string, limit: number, windowMs: number, now = Date.now()): boolean {
   const bucket = buckets.get(key);
   if (!bucket || bucket.resetAt <= now) {
     if (buckets.size >= MAX_KEYS) {
       for (const [k, b] of buckets) if (b.resetAt <= now) buckets.delete(k);
-      if (buckets.size >= MAX_KEYS) buckets.clear();
+      // まだ満杯なら古いものから消す（全消去すると、大量のキーを作るだけで全員の上限が戻ってしまう）
+      for (const k of buckets.keys()) {
+        if (buckets.size < MAX_KEYS) break;
+        buckets.delete(k);
+      }
     }
     buckets.set(key, { count: 1, resetAt: now + windowMs });
     return true;
@@ -26,9 +30,16 @@ export function resetRateLimits() {
   buckets.clear();
 }
 
+/**
+ * 利用者の IP。Vercel が設定する x-real-ip を優先する。
+ * x-forwarded-for は利用者が自由に書けるため、Vercel 以外の環境で使う場合は
+ * 前段のプロキシが上書きしていることを確かめる。
+ */
 export function clientIp(request: Request): string {
+  const real = request.headers.get("x-real-ip")?.trim();
+  if (real) return real;
   const forwarded = request.headers.get("x-forwarded-for");
-  return forwarded?.split(",")[0]?.trim() || request.headers.get("x-real-ip") || "unknown";
+  return forwarded?.split(",")[0]?.trim() || "unknown";
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
