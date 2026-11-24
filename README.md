@@ -35,6 +35,14 @@ cp .env.example .env.local   # 必要なら ANTHROPIC_API_KEY などを入れる
 npm run dev
 ```
 
+## 秘密情報の扱い
+
+`.env` などの秘密のファイルや API キーは Git にコミットしない（詳しくは CLAUDE.md）。
+
+- 秘密の値は手元では `.env.local`、本番では Vercel と Supabase の環境変数に入れる。`.env.example` には名前だけを書く。
+- `npm install` のときにコミット前のフック（`.githooks/pre-commit`）が登録される。秘密のファイルや API キーらしき文字列をコミットしようとすると止まる。
+- 手動で調べるときは、ファイルをステージしてから `sh scripts/check-secrets.sh` を実行する。
+
 ## 公開するときの設定
 
 - Vercel の関数は東京リージョン（`vercel.json` の `regions: ["hnd1"]`）で動かす。同意画面とプライバシーポリシーの説明と合わせるため、変えないこと。

@@ -40,5 +40,29 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# 環境変数の見本はコミットする
+# ---- 他人に見られて困るファイルはコミットしない（CLAUDE.md「秘密情報の扱い」） ----
+# 鍵・証明書
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+id_rsa*
+id_ed25519*
+# クラウドの認証情報
+*service-account*.json
+*credentials*.json
+.secrets/
+secrets/
+# Supabase CLI のローカル状態（DBのパスワードなどを含むことがある）
+supabase/.temp/
+supabase/.branches/
+supabase/.env
+# データベースのダンプ（利用者の会話を含みうる）
+*.dump
+*.sql.gz
+dump*.sql
+backup*.sql
+
+# 環境変数の見本だけはコミットする（値は空にしておく）
 !.env.example
