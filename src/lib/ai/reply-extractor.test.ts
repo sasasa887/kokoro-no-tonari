@@ -1,0 +1,95 @@
+import { describe, expect, it } from "vitest";
+import { parseChatOutput, parseEffort } from "./claude";
+import { ReplyExtractor } from "./reply-extractor";
+import { ChatMessageSchema, trimHistory, trimToBudget, type ChatMessage } from "./schema";
+
+describe("trimToBudget", () => {
+  const msgs: ChatMessage[] = [
+    { role: "user", content: "a".repeat(10) },
+    { role: "assistant", content: "b".repeat(50) },
+    { role: "user", content: "c".repeat(10) },
+    { role: "assistant", content: "d".repeat(10) },
+    { role: "user", content: "e".repeat(10) },
+  ];
+
+  it("文字数の上限に収まる分だけ新しい方から残し、先頭を user にそろえる", () => {
+    const t = trimToBudget(msgs, 100, 35);
+    expect(t.map((m) => m.content[0])).toEqual(["c", "d", "e"]);
+  });
+
+  it("最後の発言は上限を超えても残す", () => {
+    expect(trimToBudget(msgs, 100, 1).map((m) => m.content[0])).toEqual(["e"]);
+  });
+});
+
+describe("ChatMessageSchema", () => {
+  it("AIの長い返答（2000文字超）は受け付け、利用者の入力は2000文字までに制限する", () => {
+    expect(ChatMessageSchema.safeParse({ role: "assistant", content: "あ".repeat(3000) }).success).toBe(true);
+    expect(ChatMessageSchema.safeParse({ role: "user", content: "あ".repeat(2000) }).success).toBe(true);
+    expect(ChatMessageSchema.safeParse({ role: "user", content: "あ".repeat(2001) }).success).toBe(false);
+  });
+});
+
+describe("parseEffort", () => {
+  it("想定外の値は low に戻す", () => {
+    expect(parseEffort(undefined)).toBe("low");
+    expect(parseEffort("Medium")).toBe("medium");
+    expect(parseEffort("xhigh")).toBe("low");
+    expect(parseEffort("Low ")).toBe("low");
+  });
+});
+
+function feed(chunks: string[]): string {
+  const ex = new ReplyExtractor();
+  return chunks.map((c) => ex.push(c)).join("");
+}
+
+describe("ReplyExtractor", () => {
+  const full = JSON.stringify({ crisis: false, emotion: "calm", reply: "つらかったね。\n\"何が\"一番？ ✨" });
+
+  it("一度に渡しても reply だけを取り出す", () => {
+    expect(feed([full])).toBe("つらかったね。\n\"何が\"一番？ ✨");
+  });
+
+  it("1文字ずつ渡しても同じ結果になる（エスケープの途中で切れても壊れない）", () => {
+    expect(feed(full.split(""))).toBe("つらかったね。\n\"何が\"一番？ ✨");
+  });
+
+  it("\\u エスケープが分割されても復元する", () => {
+    const raw = '{"crisis":false,"emotion":"calm","reply":"a\\u3042b"}';
+    expect(feed([raw.slice(0, 44), raw.slice(44)])).toBe("aあb");
+  });
+
+  it("reply が終わった後の文字は出さない", () => {
+    expect(feed(['{"crisis":true,"emotion":"concerned","reply":"ok"', "}"])).toBe("ok");
+  });
+});
+
+describe("parseChatOutput", () => {
+  it("スキーマに合う JSON を受け入れる", () => {
+    expect(parseChatOutput('{"crisis":true,"emotion":"concerned","reply":"x"}')).toEqual({
+      crisis: true,
+      emotion: "concerned",
+      reply: "x",
+    });
+  });
+
+  it("形式が違えばエラーにする", () => {
+    expect(() => parseChatOutput("not json")).toThrow();
+    expect(() => parseChatOutput('{"crisis":"yes","emotion":"calm","reply":"x"}')).toThrow();
+    expect(() => parseChatOutput('{"crisis":false,"emotion":"angry","reply":"x"}')).toThrow();
+  });
+});
+
+describe("trimHistory", () => {
+  it("直近20発言に絞り、先頭を user にそろえる", () => {
+    const msgs: ChatMessage[] = Array.from({ length: 25 }, (_, i) => ({
+      role: i % 2 === 0 ? "user" : "assistant",
+      content: String(i),
+    }));
+    const t = trimHistory(msgs);
+    expect(t.length).toBeLessThanOrEqual(20);
+    expect(t[0].role).toBe("user");
+    expect(t.at(-1)?.content).toBe("24");
+  });
+});

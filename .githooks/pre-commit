@@ -1,0 +1,4 @@
+#!/bin/sh
+# コミットの前に、秘密のファイルや API キーが含まれていないかを調べる。
+# npm install のとき（package.json の prepare）に、この .githooks が Git のフックとして登録される。
+exec sh "$(git rev-parse --show-toplevel)/scripts/check-secrets.sh"
